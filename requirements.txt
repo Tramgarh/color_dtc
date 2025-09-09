@@ -5,3 +5,4 @@ svgelements
 numpy
 pandas
 opencv-python
+openpyxl
