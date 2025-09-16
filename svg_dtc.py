@@ -117,7 +117,7 @@ def xml_color_detection(file):
                                 potential_backgrounds.append(color)
 
             fill = el.attrib.get('fill')
-            if fill and fill.lower() not in ['#ffffff', '#fff', 'white', 'none']:
+            if fill:
                 colors_list.append(fill)
                 if is_background:
                     potential_backgrounds.append(fill)
@@ -209,3 +209,4 @@ if uploaded_file:
 
     else:
         st.error("Please upload an SVG file!")
+
