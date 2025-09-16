@@ -46,7 +46,7 @@ def xml_color_detection(file):
         st.error("Uploaded file is empty.")
         return None
     file.seek(0)
-    
+
     try:
         img_parse = ET.parse(file)
         root = img_parse.getroot()
@@ -54,34 +54,24 @@ def xml_color_detection(file):
         all_elements = root.findall(".//svg:*", namespace)
         colors_list = []
         potential_backgrounds = []
-        # Get SVG dimensions for better background detection
+
         svg_width = root.attrib.get('width', '100%')
         svg_height = root.attrib.get('height', '100%')
         viewbox = root.attrib.get('viewBox', '').split()
         viewbox_dims = [float(viewbox[2]), float(viewbox[3])] if len(viewbox) == 4 else None
 
-        # print(all_elements)
         for el in all_elements:
-            style_colors = {}
-
-            # internal SVG detection...
-
+            # --- Internal CSS ---
             if el.tag.endswith("style") and el.text:
                 css_text = el.text.strip()
-
-                # find `.classname { ... }`
                 rules = re.findall(r"([.#]?[a-zA-Z0-9_-]+)\s*\{([^}]*)\}", css_text)
-
                 for selector, body in rules:
-                    # find fill: inside body
                     fill_match = re.search(r"fill\s*:\s*([^;]+)", body)
                     if fill_match:
                         fill_value = fill_match.group(1).strip()
                         colors_list.append(fill_value)
 
-
-
-
+            # --- Check rect background ---
             is_background = False
             if el.tag.endswith('rect'):
                 width = el.attrib.get('width', '')
@@ -89,60 +79,60 @@ def xml_color_detection(file):
                 x = el.attrib.get('x', '0')
                 y = el.attrib.get('y', '0')
                 try:
-                    # Check if rect matches SVG or viewBox dimensions
                     if viewbox_dims:
-                        if (width in ['100%', viewbox_dims[0]] or height in ['100%', viewbox_dims[1]]) and x == '0' and y == '0':
+                        if (width in ['100%', str(viewbox_dims[0])] or 
+                            height in ['100%', str(viewbox_dims[1])]) and x == '0' and y == '0':
                             is_background = True
                     elif (width in ['100%', svg_width] or height in ['100%', svg_height]) and x == '0' and y == '0':
                         is_background = True
                 except (ValueError, TypeError):
                     pass    
-            style = el.attrib.get("style")
 
-            # inline SVG detection...
+            # --- Inline style ---
+            style = el.attrib.get("style")
             if style:
                 for obj in style.split(";"):
                     obj = obj.strip().lower()
                     if obj.startswith("fill:"):
                         color = obj.split(":")[1].strip()
-                        if color not in ['#ffffff', 'white', '#fff', 'none']:
-                            colors_list.append(color)
-                            if is_background:
-                                potential_backgrounds.append(color)
-                    elif obj.startswith("background-color:"):
-                        color = obj.split(":")[1].strip()
-                        if color not in ['#ffffff', 'white', '#fff', 'none']:
+                        if color not in ['#ffffff', 'white', '#fff', 'none', 'transparent']:
                             colors_list.append(color)
                             if is_background:
                                 potential_backgrounds.append(color)
 
+            # --- Direct fill attr ---
             fill = el.attrib.get('fill')
-            if fill:
+            if fill and fill.lower() not in ['#ffffff', '#fff', 'white', 'none', 'transparent']:
                 colors_list.append(fill)
                 if is_background:
                     potential_backgrounds.append(fill)
 
+        # -------------------------------
+        # ✅ Build dataframe outside loop
+        # -------------------------------
+        if not colors_list:
+            st.error("No colors detected in SVG.")
+            return None
 
+        colors_df = pd.DataFrame(colors_list, columns=["color"])
+        color_count = colors_df['color'].value_counts().to_frame("count")
+        total = color_count["count"].sum()
+        color_count["percentage"] = (color_count["count"] / total) * 100
+        color_count.reset_index(inplace=True)
 
-            def hex_to_rgb(hex_code):
-                hex_code = hex_code.lstrip('#')   # remove "#"
-                return tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
+        # ✅ Only keep valid hex values
+        color_count['RGB'] = color_count['color'].apply(hex_to_rgb)
+        color_count = color_count[color_count['RGB'].notnull()]
 
-            colors_df = pd.DataFrame(colors_list, columns=["color"])
-            color_count = colors_df['color'].value_counts().to_frame("count")
-            total = color_count["count"].sum()
-            color_count["percentage"] = (color_count["count"] / total) * 100
-            color_count.reset_index(inplace=True)
-            color_count['RGB'] = color_count['color'].apply(hex_to_rgb)
-            color_count = color_count[color_count['RGB'].notnull()]
+        if color_count.empty:
+            st.error("No valid hex colors remain after filtering.")
+            return None
 
-            if color_count.empty:
-                st.error("No valid colors remain after filtering.")
-                return None
+        if potential_backgrounds:
+            st.warning(f"Potential background colors (from full-size rects): {set(potential_backgrounds)}")
 
-            if potential_backgrounds:
-                st.warning(f"Potential background colors (from full-size rects): {set(potential_backgrounds)}")
-            return color_count
+        return color_count
+
     except ET.ParseError:
         st.error("There was an error parsing the SVG file. Please upload a valid SVG.")
         return None
@@ -209,4 +199,3 @@ if uploaded_file:
 
     else:
         st.error("Please upload an SVG file!")
-
