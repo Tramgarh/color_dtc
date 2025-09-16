@@ -7,11 +7,18 @@ import plotly.express as px
 import io
 import os
 import signal
+import re
 
 st.title("🎨 SVG Color Detector")
 
 
 uploaded_file = st.file_uploader("Upload an SVG file", type="svg")
+
+
+
+if st.button("❌ Stop App"):
+    os.kill(os.getpid(), signal.SIGTERM)
+
 
 
 def hex_to_rgb(hex_code):
@@ -45,17 +52,36 @@ def xml_color_detection(file):
         root = img_parse.getroot()
         namespace = {"svg": root.tag.split('}')[0].strip('{') if '}' in root.tag else "http://www.w3.org/2000/svg"}
         all_elements = root.findall(".//svg:*", namespace)
-
         colors_list = []
         potential_backgrounds = []
-
         # Get SVG dimensions for better background detection
         svg_width = root.attrib.get('width', '100%')
         svg_height = root.attrib.get('height', '100%')
         viewbox = root.attrib.get('viewBox', '').split()
         viewbox_dims = [float(viewbox[2]), float(viewbox[3])] if len(viewbox) == 4 else None
 
+        # print(all_elements)
         for el in all_elements:
+            style_colors = {}
+
+            # internal SVG detection...
+
+            if el.tag.endswith("style") and el.text:
+                css_text = el.text.strip()
+
+                # find `.classname { ... }`
+                rules = re.findall(r"([.#]?[a-zA-Z0-9_-]+)\s*\{([^}]*)\}", css_text)
+
+                for selector, body in rules:
+                    # find fill: inside body
+                    fill_match = re.search(r"fill\s*:\s*([^;]+)", body)
+                    if fill_match:
+                        fill_value = fill_match.group(1).strip()
+                        colors_list.append(fill_value)
+
+
+
+
             is_background = False
             if el.tag.endswith('rect'):
                 width = el.attrib.get('width', '')
@@ -70,9 +96,10 @@ def xml_color_detection(file):
                     elif (width in ['100%', svg_width] or height in ['100%', svg_height]) and x == '0' and y == '0':
                         is_background = True
                 except (ValueError, TypeError):
-                    pass
-
+                    pass    
             style = el.attrib.get("style")
+
+            # inline SVG detection...
             if style:
                 for obj in style.split(";"):
                     obj = obj.strip().lower()
@@ -89,33 +116,33 @@ def xml_color_detection(file):
                             if is_background:
                                 potential_backgrounds.append(color)
 
-        # Check for <style> tag (basic CSS parsing)
-        style_elements = root.findall(".//svg:style", namespace)
-        for style_el in style_elements:
-            if style_el.text:
-                for rule in style_el.text.split('}'):
-                    if 'fill:' in rule.lower() or 'background-color:' in rule.lower():
-                        st.warning("CSS styles detected in <style> tag. Inline styles only are processed.")
+            fill = el.attrib.get('fill')
+            if fill and fill.lower() not in ['#ffffff', '#fff', 'white', 'none']:
+                colors_list.append(fill)
+                if is_background:
+                    potential_backgrounds.append(fill)
 
-        if not colors_list:
-            st.error("No valid colors found in the SVG file (all colors may be white or none).")
-            return None
 
-        colors_df = pd.DataFrame(colors_list, columns=["color"])
-        color_count = colors_df['color'].value_counts().to_frame("count")
-        total = color_count["count"].sum()
-        color_count["percentage"] = (color_count["count"] / total) * 100
-        color_count.reset_index(inplace=True)
-        color_count['RGB'] = color_count['color'].apply(hex_to_rgb)
-        color_count = color_count[color_count['RGB'].notnull()]
 
-        if color_count.empty:
-            st.error("No valid colors remain after filtering.")
-            return None
+            def hex_to_rgb(hex_code):
+                hex_code = hex_code.lstrip('#')   # remove "#"
+                return tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
 
-        if potential_backgrounds:
-            st.warning(f"Potential background colors (from full-size rects): {set(potential_backgrounds)}")
-        return color_count
+            colors_df = pd.DataFrame(colors_list, columns=["color"])
+            color_count = colors_df['color'].value_counts().to_frame("count")
+            total = color_count["count"].sum()
+            color_count["percentage"] = (color_count["count"] / total) * 100
+            color_count.reset_index(inplace=True)
+            color_count['RGB'] = color_count['color'].apply(hex_to_rgb)
+            color_count = color_count[color_count['RGB'].notnull()]
+
+            if color_count.empty:
+                st.error("No valid colors remain after filtering.")
+                return None
+
+            if potential_backgrounds:
+                st.warning(f"Potential background colors (from full-size rects): {set(potential_backgrounds)}")
+            return color_count
     except ET.ParseError:
         st.error("There was an error parsing the SVG file. Please upload a valid SVG.")
         return None
@@ -181,5 +208,4 @@ if uploaded_file:
             plot_color_palette_interactive(top_colors)
 
     else:
-
         st.error("Please upload an SVG file!")
