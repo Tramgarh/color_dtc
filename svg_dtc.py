@@ -18,12 +18,6 @@ st.title("🎨 SVG Color Detector")
 uploaded_file = st.file_uploader("Upload an SVG file", type="svg")
 
 
-
-if st.button("❌ Stop App"):
-    os.kill(os.getpid(), signal.SIGTERM)
-
-
-
 # ---- AREA HELPERS ----
 def path_area(d):
     path = parse_path(d)
@@ -236,3 +230,4 @@ if uploaded_file:
 
     else:
         st.error("Please upload an SVG file!")
+
