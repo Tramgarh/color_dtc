@@ -17,6 +17,13 @@ st.title("🎨 SVG Color Detector")
 
 uploaded_file = st.file_uploader("Upload an SVG file", type="svg")
 
+
+
+if st.button("❌ Stop App"):
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+
 # ---- AREA HELPERS ----
 def path_area(d):
     path = parse_path(d)
@@ -62,25 +69,6 @@ def get_text_color(rgb):
     return "black" if luminance > 128 else "white"
 
 
-img_parse = ET.parse(uploaded_file)
-root = img_parse.getroot()
-namespace = {"svg": root.tag.split('}')[0].strip('{') if '}' in root.tag else "http://www.w3.org/2000/svg"}
-all_elements = root.findall(".//svg:*", namespace)
-
-
-def get_svg_size():
-    width = root.attrib.get("width")
-    height = root.attrib.get("height")
-    viewBox = root.attrib.get("viewBox")
-    if width and height:
-        return float(width), float(height)
-    elif viewBox:
-        parts = viewBox.split()
-        if len(parts) == 4:
-            return float(parts[2]), float(parts[3])
-    return None, None
-
-
 
 def xml_color_detection(file):
     file.seek(0)
@@ -90,6 +78,9 @@ def xml_color_detection(file):
     file.seek(0)
 
     try:
+        img_parse = ET.parse(uploaded_file)
+        root = img_parse.getroot()
+       
         # ---- COLLECT COLORS + AREAS ----
         color_area_map = {}
 
