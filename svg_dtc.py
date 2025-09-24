@@ -18,12 +18,6 @@ st.title("🎨 SVG Color Detector")
 uploaded_file = st.file_uploader("Upload an SVG file", type="svg")
 
 
-
-if st.button("❌ Stop App"):
-    os.kill(os.getpid(), signal.SIGTERM)
-
-
-
 # ---- AREA HELPERS ----
 def path_area(d):
     path = parse_path(d)
@@ -78,7 +72,7 @@ def px2mm(px_area, dpi=96):
     cm2 = px2cm(px_area, dpi)
     return cm2 * 100  # 1 cm² = 100 mm²
 
-def get_svg_size():
+def get_svg_size(root):
     """Get the width and height from the SVG file."""
     width = root.attrib.get("width")
     height = root.attrib.get("height")
@@ -91,23 +85,23 @@ def get_svg_size():
             return float(parts[2]), float(parts[3])
     return None, None
 
-# ---- XML Parsing ----
-img_parse = ET.parse(uploaded_file)
-root = img_parse.getroot()
-namespace = {"svg": root.tag.split('}')[0].strip('{') if '}' in root.tag else "http://www.w3.org/2000/svg"}
-all_elements = root.findall(".//svg:*", namespace)
 
-def xml_color_detection():
-    uploaded_file.seek(0)
-    if not uploaded_file.read(1):
+
+def xml_color_detection(file):
+    file.seek(0)
+    if not file.read(1):
         st.error("Uploaded file is empty.")
         return None
-    uploaded_file.seek(0)
+    file.seek(0)
 
     try:
-       
+       # ---- XML Parsing ----
+        img_parse = ET.parse(uploaded_file)
+        root = img_parse.getroot()
+        namespace = {"svg": root.tag.split('}')[0].strip('{') if '}' in root.tag else "http://www.w3.org/2000/svg"}
+        all_elements = root.findall(".//svg:*", namespace)
         # Get full image size
-        width, height = get_svg_size()
+        width, height = get_svg_size(root)
         total_image_area = width * height  # Full image area in pixels
 
         # Collect the color and area information
@@ -258,3 +252,4 @@ if uploaded_file:
 
     else:
         st.error("Please upload an SVG file!")
+
