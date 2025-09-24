@@ -18,6 +18,12 @@ st.title("🎨 SVG Color Detector")
 uploaded_file = st.file_uploader("Upload an SVG file", type="svg")
 
 
+
+if st.button("❌ Stop App"):
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+
 # ---- AREA HELPERS ----
 def path_area(d):
     path = parse_path(d)
@@ -62,23 +68,52 @@ def get_text_color(rgb):
     luminance = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
     return "black" if luminance > 128 else "white"
 
+def px2cm(px_area, dpi=96):
+    """Convert pixel² area to cm²."""
+    px_to_cm = 2.54 / dpi
+    return px_area * (px_to_cm ** 2)
 
+def px2mm(px_area, dpi=96):
+    """Convert pixel² area to mm²."""
+    cm2 = px2cm(px_area, dpi)
+    return cm2 * 100  # 1 cm² = 100 mm²
 
-def xml_color_detection(file):
-    file.seek(0)
-    if not file.read(1):
+def get_svg_size():
+    """Get the width and height from the SVG file."""
+    width = root.attrib.get("width")
+    height = root.attrib.get("height")
+    viewBox = root.attrib.get("viewBox")
+    if width and height:
+        return float(width), float(height)
+    elif viewBox:
+        parts = viewBox.split()
+        if len(parts) == 4:
+            return float(parts[2]), float(parts[3])
+    return None, None
+
+# ---- XML Parsing ----
+img_parse = ET.parse(uploaded_file)
+root = img_parse.getroot()
+namespace = {"svg": root.tag.split('}')[0].strip('{') if '}' in root.tag else "http://www.w3.org/2000/svg"}
+all_elements = root.findall(".//svg:*", namespace)
+
+def xml_color_detection():
+    uploaded_file.seek(0)
+    if not uploaded_file.read(1):
         st.error("Uploaded file is empty.")
         return None
-    file.seek(0)
+    uploaded_file.seek(0)
 
     try:
-        img_parse = ET.parse(uploaded_file)
-        root = img_parse.getroot()
        
-        # ---- COLLECT COLORS + AREAS ----
+        # Get full image size
+        width, height = get_svg_size()
+        total_image_area = width * height  # Full image area in pixels
+
+        # Collect the color and area information
         color_area_map = {}
 
-        # ---- Build CSS map from <style> blocks ----
+        # Build CSS map from <style> blocks
         css_fill_map = {}
         for elem in root.iter():
             if elem.tag.endswith("style") and elem.text:
@@ -89,39 +124,30 @@ def xml_color_detection(file):
                     if fill_match:
                         css_fill_map[selector.strip()] = fill_match.group(1).strip()
 
+        # Collect colors and areas
         for elem in root.iter():
             tag = elem.tag.split("}")[-1]
 
-            # 1. attribute fill
+            # Priority cascade to find the fill color
             fill = elem.attrib.get("fill")
-            if fill and fill.lower() == "none":
-                fill = None
-
-            # 2. inline style
-            style_fill = None
             style = elem.attrib.get("style")
+            style_fill = None
             if style:
                 for obj in style.split(";"):
                     obj = obj.strip().lower()
                     if obj.startswith("fill:"):
                         style_fill = obj.split(":")[1].strip()
-            if style_fill and style_fill.lower() == "none":
-                style_fill = None
 
-            # 3. CSS class mapping
             css_fill = None
             cls = elem.attrib.get("class")
-            if cls and ("."+cls in css_fill_map):
-                css_fill = css_fill_map["."+cls]
-            if css_fill and css_fill.lower() == "none":
-                css_fill = None
+            if cls and ("." + cls in css_fill_map):
+                css_fill = css_fill_map["." + cls]
 
-            # priority cascade
             color = fill or style_fill or css_fill
             if not color or color.lower() in ["none", "white", "#ffffff", "#fff"]:
                 continue
-
-            # ---- compute area ----
+            
+            # Calculate the area based on the tag type
             area = 0
             if tag == "path" and "d" in elem.attrib:
                 area = path_area(elem.attrib["d"])
@@ -142,27 +168,29 @@ def xml_color_detection(file):
             if area > 0:
                 color_area_map[color] = color_area_map.get(color, 0) + area
 
-        # -------------------------------
-        # ✅ Build dataframe OUTSIDE loop
-        # -------------------------------
-        if not color_area_map:
-            st.error("No colors detected in SVG.")
-            return None
+            # -------------------------------
+            # ✅ Build dataframe OUTSIDE loop
+            # -------------------------------
+            if not color_area_map:
+                st.error("No colors detected in SVG.")
+                return None
 
-        colors_df = pd.DataFrame(list(color_area_map.items()), columns=["color", "total_area"])
-        total_area = colors_df["total_area"].sum()
-        colors_df["percentage"] = (colors_df["total_area"] / total_area) * 100
+            colors_df = pd.DataFrame(list(color_area_map.items()), columns=["color", "total_area"])
+            colors_df["percentage"] = (colors_df["total_area"] / total_image_area) * 100
+            # Convert area to cm² and mm²
+            colors_df['cm2'] = px2cm(colors_df['total_area'])
+            colors_df['mm2'] = px2mm(colors_df['total_area'])
 
-        # Add RGB values
-        def parse_color(c):
-            c = c.strip().lower()
-            if c.startswith("rgb"):
-                nums = re.findall(r"\d+", c)
-                return tuple(map(int, nums[:3])) if len(nums) >= 3 else None
-            return hex_to_rgb(c.lstrip("#"))  # try hex
-        colors_df["RGB"] = colors_df["color"].apply(parse_color)
+            # Add RGB values
+            def parse_color(c):
+                c = c.strip().lower()
+                if c.startswith("rgb"):
+                    nums = re.findall(r"\d+", c)
+                    return tuple(map(int, nums[:3])) if len(nums) >= 3 else None
+                return hex_to_rgb(c.lstrip("#"))  # try hex
+            colors_df["RGB"] = colors_df["color"].apply(parse_color)
 
-        return colors_df
+            return colors_df
 
     except ET.ParseError:
         st.error("There was an error parsing the SVG file. Please upload a valid SVG.")
@@ -208,7 +236,7 @@ if uploaded_file:
         
         if color_count is not None:
             top_colors = color_count.head(10)  # Compute top_colors once
-            st.write(color_count[['color', 'total_area', 'percentage', 'RGB']])
+            st.write(color_count[['color', 'total_area', 'percentage', 'cm2', 'mm2', 'RGB']])
             
             output = io.BytesIO()
             color_count.to_excel(output, index=False, engine="openpyxl")
@@ -230,4 +258,3 @@ if uploaded_file:
 
     else:
         st.error("Please upload an SVG file!")
-
