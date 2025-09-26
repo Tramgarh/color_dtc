@@ -175,7 +175,8 @@ def render_svg(file):
     file.seek(0)
     svg_data = file.read().decode("utf-8")
     file.seek(0)
-    st.markdown(f'<div style="text-align: center;">{svg_data}</div>', unsafe_allow_html=True)
+    components.html(f"<div style='width:100%; height:100%;'>{svg_data}</div>", height=600)
+
 
 def plot_color_palette_interactive(color_count):
     fig = px.bar(
@@ -211,7 +212,7 @@ if uploaded_file:
         
         if color_count is not None:
             top_colors = color_count.head(10)
-            st.write(color_count[['color', 'total_area', 'percentage', 'cm2', 'mm2', 'RGB']])
+            st.write(color_count[['color', 'total_area', 'cm2', 'mm2', 'RGB']])
             
             output = io.BytesIO()
             color_count.to_excel(output, index=False, engine="openpyxl")
