@@ -153,12 +153,18 @@ def xml_color_detection(file):
 
         # Build DataFrame outside the loop
         colors_df = pd.DataFrame(list(color_area_map.items()), columns=["color", "total_area"])
-        colors_df["percentage"] = (colors_df["total_area"] / total_image_area) * 100
+        # Normalize total areas so sum = 100%
+        total_area_sum = colors_df["total_area"].sum()
+        colors_df["percentage"] = (colors_df["total_area"] / total_area_sum) * 100
+        
+        if total_area_sum > total_image_area * 1.05:
+            st.warning("⚠️ Total colored area exceeds image dimensions (overlapping shapes detected). Percentages normalized to 100%.")
+
         colors_df['cm2'] = colors_df["total_area"].apply(px2cm)
         colors_df['mm2'] = colors_df["total_area"].apply(px2mm)
         colors_df["RGB"] = colors_df["color"].apply(lambda c: parse_color(c) if parse_color(c) else hex_to_rgb(c.lstrip("#")))
 
-        return colors_df
+        return colors_df, total_image_area
 
     except ET.ParseError:
         st.error("There was an error parsing the SVG file. Please upload a valid SVG.")
@@ -175,7 +181,7 @@ def render_svg(file):
     file.seek(0)
     svg_data = file.read().decode("utf-8")
     file.seek(0)
-    components.html(f"<div style='width:100%; height:100%;'>{svg_data}</div>", height=600)
+    components.html(f"<div style='width:100%; height:100%;'>{svg_data}</div>", height=700)
 
 
 def plot_color_palette_interactive(color_count):
@@ -208,11 +214,12 @@ if uploaded_file:
     if uploaded_file.name.lower().endswith('.svg'):
         render_svg(uploaded_file)
         uploaded_file.seek(0)
-        color_count = xml_color_detection(uploaded_file)
+        color_count, total_image_area = xml_color_detection(uploaded_file)
+        st.write(f'Total image area : {total_image_area}')
         
         if color_count is not None:
             top_colors = color_count.head(10)
-            st.write(color_count[['color', 'total_area', 'cm2', 'mm2', 'RGB']])
+            st.write(color_count[['color','percentage', 'total_area', 'cm2', 'mm2', 'RGB']])
             
             output = io.BytesIO()
             color_count.to_excel(output, index=False, engine="openpyxl")
